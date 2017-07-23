@@ -16,10 +16,13 @@ import re
 import os
 import xlsxwriter
 
-_comparer = None
+
+_COMPARER = None
+
+
 def FeatureScoreComparer(sortingMetric):
-    global _comparer
-    _comparer = {
+    global _COMPARER
+    _COMPARER = {
         'gain':  lambda x: -x.Gain,
         'fscore': lambda x: -x.FScore,
         'fscoreweighted': lambda x: -x.FScoreWeighted,
@@ -79,13 +82,14 @@ class FeatureInteractions:
     def __init__(self):
         self.Count = 0
         self.interactions = {}
-
         
     def GetFeatureInteractionsOfDepth(self, depth):
-        return sorted([self.interactions[key] for key in self.interactions.keys() if self.interactions[key].Depth == depth], key = _comparer)
+        return sorted([self.interactions[key] for key in self.interactions.keys() if self.interactions[key].Depth == depth],
+                      key=_COMPARER)
         
     def GetFeatureInteractionsWithLeafStatistics(self):
-        return sorted([self.interactions[key] for key in self.interactions.keys() if self.interactions[key].HasLeafStatistics], key = _comparer)
+        return sorted([self.interactions[key] for key in self.interactions.keys() if self.interactions[key].HasLeafStatistics],
+                      key=_COMPARER)
         
     def Merge(self, other):
         for key in other.interactions.keys():
