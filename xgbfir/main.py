@@ -35,18 +35,18 @@ class SplitValueHistogram:
     def __init__(self):
         self.values = {}
 
-    def AddValue(self, splitValue, count):
-        if not (splitValue in self.values):
-            self.values[splitValue] = 0
-        self.values[splitValue] += count
+    def add_value(self, split_value, count):
+        if not (split_value in self.values):
+            self.values[split_value] = 0
+        self.values[split_value] += count
 
-    def Merge(self, histogram):
-        for key in histogram.values.keys():
-            self.AddValue(key, histogram.values[key])
+    def merge(self, histogram):
+        for key, value in histogram.values.items():
+            self.add_value(key, value)
 
 
 class FeatureInteraction:
-    def __init__(self, interaction, gain, cover, pathProbability, depth, treeIndex, fScore=1):
+    def __init__(self, interaction, gain, cover, path_probability, depth, tree_index, fscore=1):
         self.SplitValueHistogram = SplitValueHistogram()
 
         features = sorted(interaction, key=lambda x: x.Feature)
@@ -55,20 +55,20 @@ class FeatureInteraction:
         self.Depth = len(interaction) - 1
         self.Gain = gain
         self.Cover = cover
-        self.FScore = fScore
-        self.FScoreWeighted = pathProbability
+        self.FScore = fscore
+        self.FScoreWeighted = path_probability
 
         self.AverageFScoreWeighted = self.FScoreWeighted / self.FScore
         self.AverageGain = self.Gain / self.FScore
-        self.ExpectedGain = self.Gain * pathProbability
-        self.TreeIndex = treeIndex
+        self.ExpectedGain = self.Gain * path_probability
+        self.TreeIndex = tree_index
         self.TreeDepth = depth
         self.AverageTreeIndex = self.TreeIndex / self.FScore
         self.AverageTreeDepth = self.TreeDepth / self.FScore
         self.HasLeafStatistics = False
 
         if self.Depth == 0:
-            self.SplitValueHistogram.AddValue(interaction[0].SplitValue, 1)
+            self.SplitValueHistogram.add_value(interaction[0].SplitValue, 1)
 
         self.SumLeafValuesLeft = 0.0
         self.SumLeafCoversLeft = 0.0
@@ -84,11 +84,11 @@ class FeatureInteractions:
         self.Count = 0
         self.interactions = {}
 
-    def GetFeatureInteractionsOfDepth(self, depth):
+    def interactions_of_depth(self, depth):
         return sorted([self.interactions[key] for key in self.interactions.keys() if self.interactions[key].Depth == depth],
                       key=_COMPARER)
 
-    def GetFeatureInteractionsWithLeafStatistics(self):
+    def interactions_with_leaf_stats(self):
         return sorted([self.interactions[key] for key in self.interactions.keys() if self.interactions[key].HasLeafStatistics],
                       key=_COMPARER)
 
@@ -114,20 +114,20 @@ class FeatureInteractions:
                 self.interactions[key].TreeDepth += fi.TreeDepth
                 self.interactions[key].AverageTreeDepth = self.interactions[key].TreeDepth / self.interactions[key].FScore
 
-                self.interactions[key].SplitValueHistogram.Merge(fi.SplitValueHistogram)
+                self.interactions[key].SplitValueHistogram.merge(fi.SplitValueHistogram)
 
 
-class XgbModel:
+class XGBModel:
     def __init__(self, verbosity=0):
+        self.xgb_trees = []
         self._verbosity = verbosity
-        self.XgbTrees = []
-        self._treeIndex = 0
+        self._tree_index = 0
         self._maxDeepening = 0
         self._pathMemo = []
         self._maxInteractionDepth = 0
 
-    def AddTree(self, tree):
-        self.XgbTrees.append(tree)
+    def add_tree(self, tree):
+        self.xgb_trees.append(tree)
 
     def GetFeatureInteractions(self, maxInteractionDepth, maxDeepening):
         xgbFeatureInteractions = FeatureInteractions()
@@ -140,16 +140,16 @@ class XgbModel:
             else:
                 print("Collectiong feature interactions up to depth {}".format(self._maxInteractionDepth))
 
-        for i, tree in enumerate(self.XgbTrees):
+        for i, tree in enumerate(self.xgb_trees):
             if self._verbosity >= 2:
-                sys.stdout.write("Collectiong feature interactions within tree #{} ".format(i + 1))
+                sys.stdout.write("Collecting feature interactions within tree #{} ".format(i + 1))
 
             self._treeFeatureInteractions = FeatureInteractions()
             self._pathMemo = []
-            self._treeIndex = i
+            self._tree_index = i
 
-            treeNodes = []
-            self.CollectFeatureInteractions(tree, treeNodes, currentGain=0.0, currentCover=0.0, pathProbability=1.0, depth=0, deepening=0)
+            tree_nodes = []
+            self.CollectFeatureInteractions(tree, tree_nodes)
 
             if self._verbosity >= 2:
                 sys.stdout.write("=> number of interactions: {}\n".format(len(self._treeFeatureInteractions.interactions)))
@@ -160,25 +160,25 @@ class XgbModel:
 
         return xgbFeatureInteractions
 
-    def CollectFeatureInteractions(self, tree, currentInteraction, currentGain, currentCover, pathProbability, depth, deepening):
-        if tree.node.IsLeaf:
+    def CollectFeatureInteractions(self, tree, currentInteraction, currentGain=0.0, currentCover=0.0, path_probability=1.0, depth=0, deepening=0):
+        if tree.node.is_leaf:
             return
 
         currentInteraction.append(tree.node)
         currentGain += tree.node.Gain
         currentCover += tree.node.Cover
 
-        pathProbabilityLeft = pathProbability * (tree.left.node.Cover / tree.node.Cover)
-        pathProbabilityRight = pathProbability * (tree.right.node.Cover / tree.node.Cover)
+        path_probability_left = path_probability * (tree.left.node.Cover / tree.node.Cover)
+        path_probability_right = path_probability * (tree.right.node.Cover / tree.node.Cover)
 
-        fi = FeatureInteraction(currentInteraction, currentGain, currentCover, pathProbability, depth, self._treeIndex, 1)
+        fi = FeatureInteraction(currentInteraction, currentGain, currentCover, path_probability, depth, self._tree_index, 1)
 
         if (depth < self._maxDeepening) or (self._maxDeepening < 0):
             newInteractionLeft = []
             newInteractionRight = []
 
-            self.CollectFeatureInteractions(tree.left, newInteractionLeft, 0.0, 0.0, pathProbabilityLeft, depth + 1, deepening + 1)
-            self.CollectFeatureInteractions(tree.right, newInteractionRight, 0.0, 0.0, pathProbabilityRight, depth + 1, deepening + 1)
+            self.CollectFeatureInteractions(tree.left, newInteractionLeft, 0.0, 0.0, path_probability_left, depth + 1, deepening + 1)
+            self.CollectFeatureInteractions(tree.right, newInteractionRight, 0.0, 0.0, path_probability_right, depth + 1, deepening + 1)
 
         path = ",".join(str(n.Number) for n in currentInteraction)
 
@@ -194,15 +194,15 @@ class XgbModel:
             tfi.Gain += currentGain
             tfi.Cover += currentCover
             tfi.FScore += 1
-            tfi.FScoreWeighted += pathProbability
+            tfi.FScoreWeighted += path_probability
             tfi.AverageFScoreWeighted = tfi.FScoreWeighted / tfi.FScore
             tfi.AverageGain = tfi.Gain / tfi.FScore
-            tfi.ExpectedGain += currentGain * pathProbability
+            tfi.ExpectedGain += currentGain * path_probability
             tfi.TreeDepth += depth
             tfi.AverageTreeDepth = tfi.TreeDepth / tfi.FScore
-            tfi.TreeIndex += self._treeIndex
+            tfi.TreeIndex += self._tree_index
             tfi.AverageTreeIndex = tfi.TreeIndex / tfi.FScore
-            tfi.SplitValueHistogram.Merge(fi.SplitValueHistogram)
+            tfi.SplitValueHistogram.merge(fi.SplitValueHistogram)
 
         if len(currentInteraction) - 1 == self._maxInteractionDepth:
             return
@@ -210,145 +210,145 @@ class XgbModel:
         currentInteractionLeft = list(currentInteraction)
         currentInteractionRight = list(currentInteraction)
 
-        leftTree = tree.left
-        rightTree = tree.right
+        left_tree = tree.left
+        right_tree = tree.right
 
-        if leftTree.node.IsLeaf and deepening == 0:
+        if left_tree.node.is_leaf and deepening == 0:
             tfi = self._treeFeatureInteractions.interactions[fi.Name]
-            tfi.SumLeafValuesLeft += leftTree.node.LeafValue
-            tfi.SumLeafCoversLeft += leftTree.node.Cover
+            tfi.SumLeafValuesLeft += left_tree.node.LeafValue
+            tfi.SumLeafCoversLeft += left_tree.node.Cover
             tfi.HasLeafStatistics = True
 
-        if (rightTree.node.IsLeaf and (deepening == 0)):
+        if right_tree.node.is_leaf and deepening == 0:
             tfi = self._treeFeatureInteractions.interactions[fi.Name]
-            tfi.SumLeafValuesRight += rightTree.node.LeafValue
-            tfi.SumLeafCoversRight += rightTree.node.Cover
+            tfi.SumLeafValuesRight += right_tree.node.LeafValue
+            tfi.SumLeafCoversRight += right_tree.node.Cover
             tfi.HasLeafStatistics = True
 
-        self.CollectFeatureInteractions(tree.left, currentInteractionLeft, currentGain, currentCover, pathProbabilityLeft, depth + 1, deepening)
-        self.CollectFeatureInteractions(tree.right, currentInteractionRight, currentGain, currentCover, pathProbabilityRight, depth + 1, deepening)
+        self.CollectFeatureInteractions(tree.left, currentInteractionLeft, currentGain, currentCover, path_probability_left, depth + 1, deepening)
+        self.CollectFeatureInteractions(tree.right, currentInteractionRight, currentGain, currentCover, path_probability_right, depth + 1, deepening)
 
 
-class XgbTreeNode:
+class XGBTreeNode:
     def __init__(self):
         self.Feature = ''
         self.Gain = 0.0
         self.Cover = 0.0
         self.Number = -1
-        self.LeftChild = None
-        self.RightChild = None
+        self.left_child = None
+        self.right_child = None
         self.LeafValue = 0.0
         self.SplitValue = 0.0
-        self.IsLeaf = False
+        self.is_leaf = False
 
     def __lt__(self, other):
         return self.Number < other.Number
 
 
-class XgbTree:
+class XGBTree:
     def __init__(self, node):
         self.left = None
         self.right = None
         self.node = node  # or node.copy()
 
 
-class XgbModelParser:
+class XGBModelParser:
     def __init__(self, verbosity=0):
         self._verbosity = verbosity
-        self.nodeRegex = re.compile("(\d+):\[(.*)<(.+)\]\syes=(.*),no=(.*),missing=.*,gain=(.*),cover=(.*)")
-        self.leafRegex = re.compile("(\d+):leaf=(.*),cover=(.*)")
+        self.node_regex = re.compile("(\d+):\[(.*)<(.+)\]\syes=(.*),no=(.*),missing=.*,gain=(.*),cover=(.*)")
+        self.leaf_regex = re.compile("(\d+):leaf=(.*),cover=(.*)")
 
-    def ConstructXgbTree(self, tree):
-        if tree.node.LeftChild is not None:
-            tree.left = XgbTree(self.xgbNodeList[tree.node.LeftChild])
-            self.ConstructXgbTree(tree.left)
-        if tree.node.RightChild is not None:
-            tree.right = XgbTree(self.xgbNodeList[tree.node.RightChild])
-            self.ConstructXgbTree(tree.right)
+    def construct_tree(self, tree):
+        if tree.node.left_child is not None:
+            tree.left = XGBTree(self.xgb_node_list[tree.node.left_child])
+            self.construct_tree(tree.left)
+        if tree.node.right_child is not None:
+            tree.right = XGBTree(self.xgb_node_list[tree.node.right_child])
+            self.construct_tree(tree.right)
 
-    def ParseXgbTreeNode(self, line):
-        node = XgbTreeNode()
+    def parse_tree_node(self, line):
+        node = XGBTreeNode()
         if "leaf" in line:
-            m = self.leafRegex.match(line)
+            m = self.leaf_regex.match(line)
             node.Number = int(m.group(1))
             node.LeafValue = float(m.group(2))
             node.Cover = float(m.group(3))
-            node.IsLeaf = True
+            node.is_leaf = True
         else:
-            m = self.nodeRegex.match(line)
+            m = self.node_regex.match(line)
             node.Number = int(m.group(1))
             node.Feature = m.group(2)
             node.SplitValue = float(m.group(3))
-            node.LeftChild = int(m.group(4))
-            node.RightChild = int(m.group(5))
+            node.left_child = int(m.group(4))
+            node.right_child = int(m.group(5))
             node.Gain = float(m.group(6))
             node.Cover = float(m.group(7))
-            node.IsLeaf = False
+            node.is_leaf = False
         return node
 
-    def GetXgbModelFromFile(self, fileName, maxTrees):
-        model = XgbModel(self._verbosity)
-        self.xgbNodeList = {}
-        numTree = 0
+    def model_from_file(self, fileName, max_trees):
+        model = XGBModel(self._verbosity)
+        self.xgb_node_list = {}
+        number_of_trees = 0
         with open(fileName) as f:
             for line in f:
                 line = line.strip()
                 if (not line) or line.startswith('booster'):
-                    if any(self.xgbNodeList):
-                        numTree += 1
+                    if any(self.xgb_node_list):
+                        number_of_trees += 1
                         if self._verbosity >= 2:
-                            sys.stdout.write("Constructing tree #{}\n".format(numTree))
-                        tree = XgbTree(self.xgbNodeList[0])
-                        self.ConstructXgbTree(tree)
+                            sys.stdout.write("Constructing tree #{}\n".format(number_of_trees))
+                        tree = XGBTree(self.xgb_node_list[0])
+                        self.construct_tree(tree)
 
-                        model.AddTree(tree)
-                        self.xgbNodeList = {}
-                        if numTree == maxTrees:
+                        model.add_tree(tree)
+                        self.xgb_node_list = {}
+                        if number_of_trees == max_trees:
                             if self._verbosity >= 1:
-                                print('maxTrees reached')
+                                print("Maximum number of trees reached: #{}".format(max_trees))
                             break
                 else:
-                    node = self.ParseXgbTreeNode(line)
+                    node = self.parse_tree_node(line)
                     if not node:
                         return None
-                    self.xgbNodeList[node.Number] = node
+                    self.xgb_node_list[node.Number] = node
 
-            if any(self.xgbNodeList) and ((maxTrees < 0) or (numTree < maxTrees)):
-                numTree += 1
+            if any(self.xgb_node_list) and ((max_trees < 0) or (number_of_trees < max_trees)):
+                number_of_trees += 1
                 if self._verbosity >= 2:
-                    sys.stdout.write("Constructing tree #{}\n".format(numTree))
-                tree = XgbTree(self.xgbNodeList[0])
-                self.ConstructXgbTree(tree)
+                    sys.stdout.write("Constructing tree #{}\n".format(number_of_trees))
+                tree = XGBTree(self.xgb_node_list[0])
+                self.construct_tree(tree)
 
-                model.AddTree(tree)
-                self.xgbNodeList = {}
+                model.add_tree(tree)
+                self.xgb_node_list = {}
 
         return model
 
-    def GetXgbModelFromMemory(self, dump, maxTrees):
-        model = XgbModel(self._verbosity)
-        self.xgbNodeList = {}
-        numTree = 0
+    def model_from_memory(self, dump, max_trees):
+        model = XGBModel(self._verbosity)
+        self.xgb_node_list = {}
+        number_of_trees = 0
         for booster_line in dump:
-            self.xgbNodeList = {}
+            self.xgb_node_list = {}
             for line in booster_line.split('\n'):
                 line = line.strip()
                 if not line:
                     continue
-                node = self.ParseXgbTreeNode(line)
+                node = self.parse_tree_node(line)
                 if not node:
                     return None
-                self.xgbNodeList[node.Number] = node
-            numTree += 1
-            tree = XgbTree(self.xgbNodeList[0])
-            self.ConstructXgbTree(tree)
-            model.AddTree(tree)
-            if numTree == maxTrees:
+                self.xgb_node_list[node.Number] = node
+            number_of_trees += 1
+            tree = XGBTree(self.xgb_node_list[0])
+            self.construct_tree(tree)
+            model.add_tree(tree)
+            if number_of_trees == max_trees:
                 break
         return model
 
 
-def rankInplace(a):
+def rank_inplace(a):
     c = [(j, i[0]) for j, i in enumerate(sorted(enumerate(a), key=lambda x:x[1]))]
     c.sort(key=lambda x: x[1])
     return [i[0] for i in c]
@@ -377,7 +377,7 @@ def FeatureInteractionsWriter(FeatureInteractions, fileName, MaxDepth, topK, Max
         if verbosity >= 1:
             print("Writing feature interactions with depth {}".format(depth))
 
-        interactions = FeatureInteractions.GetFeatureInteractionsOfDepth(depth)
+        interactions = FeatureInteractions.interactions_of_depth(depth)
 
         KTotalGain = sum([i.Gain for i in interactions])
         TotalCover = sum([i.Cover for i in interactions])
@@ -410,12 +410,12 @@ def FeatureInteractionsWriter(FeatureInteractions, fileName, MaxDepth, topK, Max
         ]):
             ws.write(0, col, name)
 
-        gainSorted = rankInplace([-f.Gain for f in interactions])
-        fScoreSorted = rankInplace([-f.FScore for f in interactions])
-        fScoreWeightedSorted = rankInplace([-f.FScoreWeighted for f in interactions])
-        averagefScoreWeightedSorted = rankInplace([-f.AverageFScoreWeighted for f in interactions])
-        averageGainSorted = rankInplace([-f.AverageGain for f in interactions])
-        expectedGainSorted = rankInplace([-f.ExpectedGain for f in interactions])
+        gainSorted = rank_inplace([-f.Gain for f in interactions])
+        fScoreSorted = rank_inplace([-f.FScore for f in interactions])
+        fScoreWeightedSorted = rank_inplace([-f.FScoreWeighted for f in interactions])
+        averagefScoreWeightedSorted = rank_inplace([-f.AverageFScoreWeighted for f in interactions])
+        averageGainSorted = rank_inplace([-f.AverageGain for f in interactions])
+        expectedGainSorted = rank_inplace([-f.ExpectedGain for f in interactions])
 
         for i, fi in enumerate(interactions):
             ws.write(i + 1, 0, fi.Name)
@@ -435,7 +435,7 @@ def FeatureInteractionsWriter(FeatureInteractions, fileName, MaxDepth, topK, Max
             ws.write(i + 1, 14, fi.AverageTreeIndex)
             ws.write(i + 1, 15, fi.AverageTreeDepth)
 
-    interactions = FeatureInteractions.GetFeatureInteractionsWithLeafStatistics()
+    interactions = FeatureInteractions.interactions_with_leaf_stats()
     if interactions:
         if verbosity >= 1:
             print("Writing leaf statistics")
@@ -458,7 +458,7 @@ def FeatureInteractionsWriter(FeatureInteractions, fileName, MaxDepth, topK, Max
             ws.write(i + 1, 3, fi.SumLeafCoversLeft)
             ws.write(i + 1, 4, fi.SumLeafCoversRight)
 
-    interactions = FeatureInteractions.GetFeatureInteractionsOfDepth(0)
+    interactions = FeatureInteractions.interactions_of_depth(0)
     if interactions:
         if verbosity >= 1:
             print("Writing split value histograms")
@@ -509,7 +509,7 @@ URL: https://github.com/limexp/xgbfir
         version='XGBoost Feature Interactions Reshaped 0.2')
 
     arg_parser.add_argument(
-        '-m', dest='XgbModelFile', action='store', default='xgb.dump',
+        '-m', dest='XGBModelFile', action='store', default='xgb.dump',
         help="Xgboost model dump (dumped w/ 'with_stats=True')")
 
     arg_parser.add_argument(
@@ -546,7 +546,7 @@ URL: https://github.com/limexp/xgbfir
 
     args = arg_parser.parse_args(args=argv[1:])
 
-    args.XgbModelFile = args.XgbModelFile.strip()
+    args.XGBModelFile = args.XGBModelFile.strip()
     args.OutputXlsxFile = args.OutputXlsxFile.strip()
 
     verbosity = int(args.Verbosity)
@@ -554,7 +554,7 @@ URL: https://github.com/limexp/xgbfir
     settings_print = '''
 Settings:
 =========
-XgbModelFile (-m): {model}
+XGBModelFile (-m): {model}
 OutputXlsxFile (-o): {output}
 MaxInteractionDepth: {depth}
 MaxDeepening (-g): {deepening}
@@ -563,7 +563,7 @@ TopK (-k): {topk}
 SortBy (-s): {sortby}
 MaxHistograms (-H): {histograms}
 '''.format(
-        model=args.XgbModelFile,
+        model=args.XGBModelFile,
         output=args.OutputXlsxFile,
         depth=args.MaxInteractionDepth,
         deepening=args.MaxDeepening,
@@ -578,8 +578,8 @@ MaxHistograms (-H): {histograms}
 
     FeatureScoreComparer(args.SortBy)
 
-    xgbParser = XgbModelParser(verbosity)
-    xgbModel = xgbParser.GetXgbModelFromFile(args.XgbModelFile, args.MaxTrees)
+    xgbParser = XGBModelParser(verbosity)
+    xgbModel = xgbParser.model_from_file(args.XGBModelFile, args.MaxTrees)
     featureInteractions = xgbModel.GetFeatureInteractions(args.MaxInteractionDepth, args.MaxDeepening)
 
     FeatureInteractionsWriter(featureInteractions, args.OutputXlsxFile, args.MaxInteractionDepth, args.TopK, args.MaxHistograms)
@@ -608,9 +608,9 @@ def saveXgbFI(booster, feature_names=None, OutputXlsxFile='XgbFeatureInteraction
         else:
             booster.feature_names = list(feature_names)
     FeatureScoreComparer(SortBy)
-    xgbParser = XgbModelParser()
+    xgbParser = XGBModelParser()
     dump = booster.get_dump('', with_stats=True)
-    xgbModel = xgbParser.GetXgbModelFromMemory(dump, MaxTrees)
+    xgbModel = xgbParser.model_from_memory(dump, MaxTrees)
     featureInteractions = xgbModel.GetFeatureInteractions(MaxInteractionDepth, MaxDeepening)
     FeatureInteractionsWriter(featureInteractions, OutputXlsxFile, MaxInteractionDepth, TopK, MaxHistograms)
 
