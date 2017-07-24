@@ -144,106 +144,111 @@ class XGBModel:
         self.xgb_trees = []
         self._verbosity = verbosity
         self._tree_index = 0
-        self._maxDeepening = 0
-        self._pathMemo = []
-        self._maxInteractionDepth = 0
+        self._max_deepening = 0
+        # TODO: Should path_memo be a set?
+        self._path_memo = []
+        self._max_interaction_depth = 0
 
     def add_tree(self, tree):
         self.xgb_trees.append(tree)
 
-    def feature_interactions(self, maxInteractionDepth, maxDeepening):
-        xgbFeatureInteractions = FeatureInteractions()
-        self._maxInteractionDepth = maxInteractionDepth
-        self._maxDeepening = maxDeepening
+    def feature_interactions(self, max_interaction_depth, max_deepening):
+        xgb_feature_interactions = FeatureInteractions()
+        self._max_interaction_depth = max_interaction_depth
+        self._max_deepening = max_deepening
 
         if self._verbosity >= 1:
-            if self._maxInteractionDepth == -1:
+            if self._max_interaction_depth == -1:
                 print("Collecting feature interactions")
             else:
-                print("Collecting feature interactions up to depth {}".format(self._maxInteractionDepth))
+                print("Collecting feature interactions up to depth {}".format(self._max_interaction_depth))
 
         for i, tree in enumerate(self.xgb_trees):
             if self._verbosity >= 2:
                 sys.stdout.write("Collecting feature interactions within tree #{} ".format(i + 1))
 
-            self._treeFeatureInteractions = FeatureInteractions()
-            self._pathMemo = []
+            self._tree_feature_interactions = FeatureInteractions()
+            self._path_memo = []
             self._tree_index = i
 
             tree_nodes = []
             self.collect_interactions(tree, tree_nodes)
 
             if self._verbosity >= 2:
-                sys.stdout.write("=> number of interactions: {}\n".format(len(self._treeFeatureInteractions.interactions)))
-            xgbFeatureInteractions.merge(self._treeFeatureInteractions)
+                number_interactions = len(self._tree_feature_interactions.interactions)
+                sys.stdout.write("=> number of interactions: {}\n".format(number_interactions))
+
+            xgb_feature_interactions.merge(self._tree_feature_interactions)
 
         if self._verbosity >= 1:
-            print("{} feature interactions has been collected.".format(len(xgbFeatureInteractions.interactions)))
+            number_collected = len(xgb_feature_interactions.interactions)
+            print("{} feature interactions has been collected.".format(number_collected))
 
-        return xgbFeatureInteractions
+        return xgb_feature_interactions
 
-    def collect_interactions(self, tree, currentInteraction, currentGain=0.0, currentCover=0.0, path_probability=1.0, depth=0, deepening=0):
+    def collect_interactions(self, tree, current_interaction, gain=0.0, cover=0.0, path_probability=1.0, depth=0, deepening=0):
         if tree.node.is_leaf:
             return
 
-        currentInteraction.append(tree.node)
-        currentGain += tree.node.gain
-        currentCover += tree.node.cover
+        current_interaction.append(tree.node)
+        gain += tree.node.gain
+        cover += tree.node.cover
 
         path_probability_left = path_probability * (tree.left.node.cover / tree.node.cover)
         path_probability_right = path_probability * (tree.right.node.cover / tree.node.cover)
 
-        fi = FeatureInteraction(currentInteraction, currentGain, currentCover, path_probability, depth, self._tree_index, 1)
+        fi = FeatureInteraction(current_interaction, gain, cover, path_probability, depth, self._tree_index, 1)
 
-        if (depth < self._maxDeepening) or (self._maxDeepening < 0):
-            newInteractionLeft = []
-            newInteractionRight = []
+        if depth < self._max_deepening or self._max_deepening < 0:
+            interaction_left = []
+            interaction_right = []
+            # TODO: I think the recursion is here?
+            self.collect_interactions(tree.left, interaction_left, 0.0, 0.0, path_probability_left, depth + 1, deepening + 1)
+            self.collect_interactions(tree.right, interaction_right, 0.0, 0.0, path_probability_right, depth + 1, deepening + 1)
 
-            self.collect_interactions(tree.left, newInteractionLeft, 0.0, 0.0, path_probability_left, depth + 1, deepening + 1)
-            self.collect_interactions(tree.right, newInteractionRight, 0.0, 0.0, path_probability_right, depth + 1, deepening + 1)
+        path = ",".join(str(n.number) for n in current_interaction)
 
-        path = ",".join(str(n.number) for n in currentInteraction)
-
-        if fi.name not in self._treeFeatureInteractions.interactions:
-            self._treeFeatureInteractions.interactions[fi.name] = fi
-            self._pathMemo.append(path)
+        if fi.name not in self._tree_feature_interactions.interactions:
+            self._tree_feature_interactions.interactions[fi.name] = fi
+            self._path_memo.append(path)
         else:
-            if path in self._pathMemo:
+            if path in self._path_memo:
                 return
-            self._pathMemo.append(path)
+            self._path_memo.append(path)
 
-            tfi = self._treeFeatureInteractions.interactions[fi.name]
-            tfi.gain += currentGain
-            tfi.cover += currentCover
+            # TODO: Shouldn't `tfi` do this with an update method?
+            tfi = self._tree_feature_interactions.interactions[fi.name]
+            tfi.gain += gain
+            tfi.cover += cover
             tfi.fscore += 1
             tfi.wfscore += path_probability
             tfi.tree_depth += depth
             tfi.tree_index += self._tree_index
             tfi.histogram.merge(fi.histogram)
 
-        if len(currentInteraction) - 1 == self._maxInteractionDepth:
+        if len(current_interaction) - 1 == self._max_interaction_depth:
             return
 
-        currentInteractionLeft = list(currentInteraction)
-        currentInteractionRight = list(currentInteraction)
+        current_interaction_left = list(current_interaction)
+        current_interaction_right = list(current_interaction)
 
         left_tree = tree.left
         right_tree = tree.right
 
         if left_tree.node.is_leaf and deepening == 0:
-            tfi = self._treeFeatureInteractions.interactions[fi.name]
+            tfi = self._tree_feature_interactions.interactions[fi.name]
             tfi.sum_leaf_values_left += left_tree.node.leaf_value
             tfi.sum_leaf_covers_left += left_tree.node.cover
             tfi.has_leaf_stats = True
 
         if right_tree.node.is_leaf and deepening == 0:
-            tfi = self._treeFeatureInteractions.interactions[fi.name]
+            tfi = self._tree_feature_interactions.interactions[fi.name]
             tfi.sum_leaf_values_right += right_tree.node.leaf_value
             tfi.sum_leaf_covers_right += right_tree.node.cover
             tfi.has_leaf_stats = True
 
-        self.collect_interactions(tree.left, currentInteractionLeft, currentGain, currentCover, path_probability_left, depth + 1, deepening)
-        self.collect_interactions(tree.right, currentInteractionRight, currentGain, currentCover, path_probability_right, depth + 1, deepening)
+        self.collect_interactions(tree.left, current_interaction_left, gain, cover, path_probability_left, depth + 1, deepening)
+        self.collect_interactions(tree.right, current_interaction_right, gain, cover, path_probability_right, depth + 1, deepening)
 
 
 class XGBTreeNode:
@@ -274,14 +279,14 @@ class XGBModelParser:
         self._verbosity = verbosity
         self.node_regex = re.compile("(\d+):\[(.*)<(.+)\]\syes=(.*),no=(.*),missing=.*,gain=(.*),cover=(.*)")
         self.leaf_regex = re.compile("(\d+):leaf=(.*),cover=(.*)")
-        self.xgb_node_list = {}
+        self.node_list = {}
 
     def construct_tree(self, tree):
         if tree.node.left_child is not None:
-            tree.left = XGBTree(self.xgb_node_list[tree.node.left_child])
+            tree.left = XGBTree(self.node_list[tree.node.left_child])
             self.construct_tree(tree.left)
         if tree.node.right_child is not None:
-            tree.right = XGBTree(self.xgb_node_list[tree.node.right_child])
+            tree.right = XGBTree(self.node_list[tree.node.right_child])
             self.construct_tree(tree.right)
 
     def parse_tree_node(self, line):
@@ -306,21 +311,21 @@ class XGBModelParser:
 
     def model_from_file(self, file_name, max_trees):
         model = XGBModel(self._verbosity)
-        self.xgb_node_list = {}
+        self.node_list = {}
         number_of_trees = 0
         with open(file_name) as f:
             for line in f:
                 line = line.strip()
                 if (not line) or line.startswith('booster'):
-                    if any(self.xgb_node_list):
+                    if any(self.node_list):
                         number_of_trees += 1
                         if self._verbosity >= 2:
                             sys.stdout.write("Constructing tree #{}\n".format(number_of_trees))
-                        tree = XGBTree(self.xgb_node_list[0])
+                        tree = XGBTree(self.node_list[0])
                         self.construct_tree(tree)
 
                         model.add_tree(tree)
-                        self.xgb_node_list = {}
+                        self.node_list = {}
                         if number_of_trees == max_trees:
                             if self._verbosity >= 1:
                                 print("Maximum number of trees reached: #{}".format(max_trees))
@@ -329,26 +334,26 @@ class XGBModelParser:
                     node = self.parse_tree_node(line)
                     if not node:
                         return None
-                    self.xgb_node_list[node.number] = node
+                    self.node_list[node.number] = node
 
-            if any(self.xgb_node_list) and ((max_trees < 0) or (number_of_trees < max_trees)):
+            if any(self.node_list) and (max_trees < 0 or number_of_trees < max_trees):
                 number_of_trees += 1
                 if self._verbosity >= 2:
                     sys.stdout.write("Constructing tree #{}\n".format(number_of_trees))
-                tree = XGBTree(self.xgb_node_list[0])
+                tree = XGBTree(self.node_list[0])
                 self.construct_tree(tree)
 
                 model.add_tree(tree)
-                self.xgb_node_list = {}
+                self.node_list = {}
 
         return model
 
     def model_from_memory(self, dump, max_trees):
         model = XGBModel(self._verbosity)
-        self.xgb_node_list = {}
+        self.node_list = {}
         number_of_trees = 0
         for booster_line in dump:
-            self.xgb_node_list = {}
+            self.node_list = {}
             for line in booster_line.split('\n'):
                 line = line.strip()
                 if not line:
@@ -356,9 +361,9 @@ class XGBModelParser:
                 node = self.parse_tree_node(line)
                 if not node:
                     return None
-                self.xgb_node_list[node.number] = node
+                self.node_list[node.number] = node
             number_of_trees += 1
-            tree = XGBTree(self.xgb_node_list[0])
+            tree = XGBTree(self.node_list[0])
             self.construct_tree(tree)
             model.add_tree(tree)
             if number_of_trees == max_trees:
@@ -372,7 +377,7 @@ def rank_inplace(a):
     return [i[0] for i in c]
 
 
-def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, MaxHistograms, verbosity=0):
+def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, max_histograms, verbosity=0):
 
     if verbosity >= 1:
         print("Writing {}".format(file_name))
@@ -438,20 +443,21 @@ def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, Ma
         for i, fi in enumerate(interactions):
             ws.write(i + 1, 0, fi.name)
             ws.write(i + 1, 1, fi.gain)
-            ws.write(i + 1, 2, fi.fscore)
-            ws.write(i + 1, 3, fi.wfscore)
-            ws.write(i + 1, 4, fi.average_wfscore)
-            ws.write(i + 1, 5, fi.average_gain)
-            ws.write(i + 1, 6, fi.expected_gain)
+            ws.write(i + 1, 2, fi.fscore, cf_num)
+            ws.write(i + 1, 3, fi.wfscore, cf_num)
+            ws.write(i + 1, 4, fi.average_wfscore, cf_num)
+            ws.write(i + 1, 5, fi.average_gain, cf_num)
+            ws.write(i + 1, 6, fi.expected_gain, cf_num)
             ws.write(i + 1, 7, 1 + gainSorted[i])
             ws.write(i + 1, 8, 1 + fScoreSorted[i])
             ws.write(i + 1, 9, 1 + fScoreWeightedSorted[i])
             ws.write(i + 1, 10, 1 + averagefScoreWeightedSorted[i])
             ws.write(i + 1, 11, 1 + averageGainSorted[i])
             ws.write(i + 1, 12, 1 + expectedGainSorted[i])
-            ws.write(i + 1, 13, (6.0 + gainSorted[i] + fScoreSorted[i] + fScoreWeightedSorted[i] + averagefScoreWeightedSorted[i] + averageGainSorted[i] + expectedGainSorted[i]) / 6.0)
-            ws.write(i + 1, 14, fi.average_tree_index)
-            ws.write(i + 1, 15, fi.average_tree_depth)
+            average_rank = (6.0 + gainSorted[i] + fScoreSorted[i] + fScoreWeightedSorted[i] + averagefScoreWeightedSorted[i] + averageGainSorted[i] + expectedGainSorted[i]) / 6.0
+            ws.write(i + 1, 13, average_rank, cf_num)
+            ws.write(i + 1, 14, fi.average_tree_index, cf_num)
+            ws.write(i + 1, 15, fi.average_tree_depth, cf_num)
 
     interactions = FeatureInteractions.interactions_with_leaf_stats()
     if interactions:
@@ -471,10 +477,10 @@ def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, Ma
 
         for i, fi in enumerate(interactions):
             ws.write(i + 1, 0, fi.name)
-            ws.write(i + 1, 1, fi.sum_leaf_values_left)
-            ws.write(i + 1, 2, fi.sum_leaf_values_right)
-            ws.write(i + 1, 3, fi.sum_leaf_covers_left)
-            ws.write(i + 1, 4, fi.sum_leaf_covers_right)
+            ws.write(i + 1, 1, fi.sum_leaf_values_left, cf_num)
+            ws.write(i + 1, 2, fi.sum_leaf_values_right, cf_num)
+            ws.write(i + 1, 3, fi.sum_leaf_covers_left, cf_num)
+            ws.write(i + 1, 4, fi.sum_leaf_covers_right, cf_num)
 
     interactions = FeatureInteractions.interactions_of_depth(0)
     if interactions:
@@ -493,7 +499,7 @@ def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, Ma
             ws.write(0, col, name)
 
         for i, fi in enumerate(interactions):
-            if i >= MaxHistograms:
+            if i >= max_histograms:
                 break
 
             c1 = i * 2
@@ -539,19 +545,19 @@ URL: https://github.com/limexp/xgbfir
         help='Upper bound for trees to be parsed')
 
     arg_parser.add_argument(
-        '-d', dest='MaxInteractionDepth', action='store', default='2', type=int,
+        '-d', dest='max_interaction_depth', action='store', default='2', type=int,
         help='Upper bound for extracted feature interactions depth')
 
     arg_parser.add_argument(
-        '-g', dest='MaxDeepening', action='store', default='-1', type=int,
+        '-g', dest='max_deepening', action='store', default='-1', type=int,
         help='Upper bound for interaction start deepening (zero deepening => interactions starting @root only)')
 
     arg_parser.add_argument(
-        '-k', dest='TopK', action='store', default='100', type=int,
+        '-k', dest='top_k', action='store', default='100', type=int,
         help='Upper bound for exported feature interactions per depth level')
 
     arg_parser.add_argument(
-        '-H', dest='MaxHistograms', action='store', default='10', type=int,
+        '-H', dest='max_histograms', action='store', default='10', type=int,
         help='Maximum number of histograms')
 
     arg_parser.add_argument(
@@ -574,21 +580,21 @@ Settings:
 =========
 XGBModelFile (-m): {model}
 output (-o): {output}
-MaxInteractionDepth: {depth}
-MaxDeepening (-g): {deepening}
+max_interaction_depth: {depth}
+max_deepening (-g): {deepening}
 max_trees (-t): {trees}
-TopK (-k): {topk}
+top_k (-k): {topk}
 SortBy (-s): {sortby}
-MaxHistograms (-H): {histograms}
+max_histograms (-H): {histograms}
 '''.format(
         model=args.XGBModelFile,
         output=args.output,
-        depth=args.MaxInteractionDepth,
-        deepening=args.MaxDeepening,
+        depth=args.max_interaction_depth,
+        deepening=args.max_deepening,
         trees=args.max_trees,
-        topk=args.TopK,
+        topk=args.top_k,
         sortby=args.SortBy,
-        histograms=args.MaxHistograms
+        histograms=args.max_histograms
     )
 
     if verbosity >= 1:
@@ -598,9 +604,9 @@ MaxHistograms (-H): {histograms}
 
     parser = XGBModelParser(verbosity)
     model = parser.model_from_file(args.XGBModelFile, args.max_trees)
-    interactions = model.feature_interactions(args.MaxInteractionDepth, args.MaxDeepening)
+    interactions = model.feature_interactions(args.max_interaction_depth, args.max_deepening)
 
-    FeatureInteractionsWriter(interactions, args.output, args.MaxInteractionDepth, args.TopK, args.MaxHistograms)
+    FeatureInteractionsWriter(interactions, args.output, args.max_interaction_depth, args.top_k, args.max_histograms)
 
     if verbosity >= 1:
         print(epilog)
@@ -613,7 +619,7 @@ def entry_point():
     raise SystemExit(main(sys.argv))
 
 
-def save_excel(booster, feature_names=None, output='XGBFeatureInteractions.xlsx', max_trees=100, MaxInteractionDepth=2, MaxDeepening=-1, TopK=100, MaxHistograms=10, SortBy='Gain'):
+def save_excel(booster, feature_names=None, output='XGBFeatureInteractions.xlsx', max_trees=100, max_interaction_depth=2, max_deepening=-1, top_k=100, max_histograms=10, SortBy='Gain'):
     if 'get_dump' not in dir(booster):
         if 'booster' in dir(booster):
             booster = booster.booster()
@@ -629,8 +635,8 @@ def save_excel(booster, feature_names=None, output='XGBFeatureInteractions.xlsx'
     parser = XGBModelParser()
     dump = booster.get_dump('', with_stats=True)
     model = parser.model_from_memory(dump, max_trees)
-    interactions = model.feature_interactions(MaxInteractionDepth, MaxDeepening)
-    FeatureInteractionsWriter(interactions, output, MaxInteractionDepth, TopK, MaxHistograms)
+    interactions = model.feature_interactions(max_interaction_depth, max_deepening)
+    FeatureInteractionsWriter(interactions, output, max_interaction_depth, top_k, max_histograms)
 
 
 if __name__ == '__main__':
