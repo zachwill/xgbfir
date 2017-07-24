@@ -8,8 +8,7 @@
 # Originally based on implementation by Far0n
 # https://github.com/Far0n/xgbfi
 
-# TODO: Should `division` be imported too?
-from __future__ import print_function
+from __future__ import print_function, division
 
 import argparse
 import sys
@@ -145,8 +144,7 @@ class XGBModel:
         self._verbosity = verbosity
         self._tree_index = 0
         self._max_deepening = 0
-        # TODO: Should path_memo be a set?
-        self._path_memo = []
+        self._path_memo = set()
         self._max_interaction_depth = 0
 
     def add_tree(self, tree):
@@ -168,7 +166,7 @@ class XGBModel:
                 sys.stdout.write("Collecting feature interactions within tree #{} ".format(i + 1))
 
             self._tree_feature_interactions = FeatureInteractions()
-            self._path_memo = []
+            self._path_memo = set()
             self._tree_index = i
 
             tree_nodes = []
@@ -210,11 +208,11 @@ class XGBModel:
 
         if fi.name not in self._tree_feature_interactions.interactions:
             self._tree_feature_interactions.interactions[fi.name] = fi
-            self._path_memo.append(path)
+            self._path_memo.add(path)
         else:
             if path in self._path_memo:
                 return
-            self._path_memo.append(path)
+            self._path_memo.add(path)
 
             # TODO: Shouldn't `tfi` do this with an update method?
             tfi = self._tree_feature_interactions.interactions[fi.name]
@@ -442,7 +440,7 @@ def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, ma
 
         for i, fi in enumerate(interactions):
             ws.write(i + 1, 0, fi.name)
-            ws.write(i + 1, 1, fi.gain)
+            ws.write(i + 1, 1, fi.gain, cf_num)
             ws.write(i + 1, 2, fi.fscore, cf_num)
             ws.write(i + 1, 3, fi.wfscore, cf_num)
             ws.write(i + 1, 4, fi.average_wfscore, cf_num)
@@ -561,7 +559,7 @@ URL: https://github.com/limexp/xgbfir
         help='Maximum number of histograms')
 
     arg_parser.add_argument(
-        '-s', dest='SortBy', action='store', default='Gain',
+        '-s', dest='sort', action='store', default='Gain',
         help='Score metric to sort by (Gain, FScore, wFScore, AvgwFScore, AvgGain, ExpGain)')
 
     arg_parser.add_argument(
@@ -584,7 +582,7 @@ max_interaction_depth: {depth}
 max_deepening (-g): {deepening}
 max_trees (-t): {trees}
 top_k (-k): {topk}
-SortBy (-s): {sortby}
+sort (-s): {sortby}
 max_histograms (-H): {histograms}
 '''.format(
         model=args.XGBModelFile,
@@ -593,14 +591,14 @@ max_histograms (-H): {histograms}
         deepening=args.max_deepening,
         trees=args.max_trees,
         topk=args.top_k,
-        sortby=args.SortBy,
+        sortby=args.sort,
         histograms=args.max_histograms
     )
 
     if verbosity >= 1:
         print(settings_print)
 
-    feature_score_comparer(args.SortBy)
+    feature_score_comparer(args.sort)
 
     parser = XGBModelParser(verbosity)
     model = parser.model_from_file(args.XGBModelFile, args.max_trees)
@@ -619,7 +617,7 @@ def entry_point():
     raise SystemExit(main(sys.argv))
 
 
-def save_excel(booster, feature_names=None, output='XGBFeatureInteractions.xlsx', max_trees=100, max_interaction_depth=2, max_deepening=-1, top_k=100, max_histograms=10, SortBy='Gain'):
+def save_excel(booster, feature_names=None, output='XGBFeatureInteractions.xlsx', max_trees=100, max_interaction_depth=2, max_deepening=-1, top_k=100, max_histograms=10, sort='Gain'):
     if 'get_dump' not in dir(booster):
         if 'booster' in dir(booster):
             booster = booster.booster()
@@ -631,7 +629,7 @@ def save_excel(booster, feature_names=None, output='XGBFeatureInteractions.xlsx'
             booster.feature_names = feature_names
         else:
             booster.feature_names = list(feature_names)
-    feature_score_comparer(SortBy)
+    feature_score_comparer(sort)
     parser = XGBModelParser()
     dump = booster.get_dump('', with_stats=True)
     model = parser.model_from_memory(dump, max_trees)
