@@ -8,6 +8,7 @@
 # Originally based on implementation by Far0n
 # https://github.com/Far0n/xgbfi
 
+# TODO: Should `division` be imported too?
 from __future__ import print_function
 
 import argparse
@@ -25,8 +26,8 @@ def feature_score_comparer(metric):
     _COMPARER = {
         'gain': lambda x: -x.gain,
         'fscore': lambda x: -x.FScore,
-        'fscoreweighted': lambda x: -x.fscore_weighted,
-        'average_fscore_weighted': lambda x: -x.average_fscore_weighted,
+        'wfscore': lambda x: -x.wfscore,
+        'average_wfscore': lambda x: -x.average_wfscore,
         'averagegain': lambda x: -x.average_gain,
         'expectedgain': lambda x: -x.expected_gain,
     }[metric.lower()]
@@ -57,23 +58,24 @@ class FeatureInteraction:
         self.gain = gain
         self.cover = cover
         self.fscore = fscore
-        self.fscore_weighted = path_probability
+        self.wfscore = path_probability
         self.tree_index = tree_index
         self.tree_depth = depth
+        # TODO: Might need to set `expected_gain`
         self.has_leaf_stats = False
 
         if self.depth == 0:
             self.histogram.add_value(interaction[0].split_value, 1)
 
-        self.SumLeafValuesLeft = 0.0
-        self.SumLeafValuesRight = 0.0
+        self.sum_leaf_values_left = 0.0
+        self.sum_leaf_values_right = 0.0
 
-        self.SumLeafCoversLeft = 0.0
-        self.SumLeafCoversRight = 0.0
+        self.sum_leaf_covers_left = 0.0
+        self.sum_leaf_covers_right = 0.0
 
     @property
-    def average_fscore_weighted(self):
-        return self.fscore_weighted / self.fscore
+    def average_wfscore(self):
+        return self.wfscore / self.fscore
 
     @property
     def average_gain(self):
@@ -82,7 +84,7 @@ class FeatureInteraction:
     @property
     def expected_gain(self):
         # TODO: This could be wrong -- it was originally a += stat
-        return self.gain * self.fscore_weighted
+        return self.gain * self.wfscore
 
     @property
     def average_tree_index(self):
@@ -99,9 +101,11 @@ class FeatureInteraction:
 class FeatureInteractions:
     def __init__(self):
         self.interactions = {}
+        # TODO: Shouldn't comparsion take place here? And be an initial param?
 
     @property
     def count(self):
+        # TODO: This was never used in previous code
         return len(self.interactions.keys())
 
     def interactions_of_depth(self, depth):
@@ -125,13 +129,13 @@ class FeatureInteractions:
                 self.interactions[key].gain += feature.gain
                 self.interactions[key].cover += feature.cover
                 self.interactions[key].fscore += feature.fscore
-                self.interactions[key].fscore_weighted += feature.fscore_weighted
-                self.interactions[key].SumLeafCoversLeft += feature.SumLeafCoversLeft
-                self.interactions[key].SumLeafCoversRight += feature.SumLeafCoversRight
-                self.interactions[key].SumLeafValuesLeft += feature.SumLeafValuesLeft
-                self.interactions[key].SumLeafValuesRight += feature.SumLeafValuesRight
+                self.interactions[key].wfscore += feature.wfscore
                 self.interactions[key].tree_index += feature.tree_index
                 self.interactions[key].tree_depth += feature.tree_depth
+                self.interactions[key].sum_leaf_covers_left += feature.sum_leaf_covers_left
+                self.interactions[key].sum_leaf_covers_right += feature.sum_leaf_covers_right
+                self.interactions[key].sum_leaf_values_left += feature.sum_leaf_values_left
+                self.interactions[key].sum_leaf_values_right += feature.sum_leaf_values_right
                 self.interactions[key].histogram.merge(feature.histogram)
 
 
@@ -212,7 +216,7 @@ class XGBModel:
             tfi.gain += currentGain
             tfi.cover += currentCover
             tfi.fscore += 1
-            tfi.fscore_weighted += path_probability
+            tfi.wfscore += path_probability
             tfi.tree_depth += depth
             tfi.tree_index += self._tree_index
             tfi.histogram.merge(fi.histogram)
@@ -228,14 +232,14 @@ class XGBModel:
 
         if left_tree.node.is_leaf and deepening == 0:
             tfi = self._treeFeatureInteractions.interactions[fi.name]
-            tfi.SumLeafValuesLeft += left_tree.node.leaf_value
-            tfi.SumLeafCoversLeft += left_tree.node.cover
+            tfi.sum_leaf_values_left += left_tree.node.leaf_value
+            tfi.sum_leaf_covers_left += left_tree.node.cover
             tfi.has_leaf_stats = True
 
         if right_tree.node.is_leaf and deepening == 0:
             tfi = self._treeFeatureInteractions.interactions[fi.name]
-            tfi.SumLeafValuesRight += right_tree.node.leaf_value
-            tfi.SumLeafCoversRight += right_tree.node.cover
+            tfi.sum_leaf_values_right += right_tree.node.leaf_value
+            tfi.sum_leaf_covers_right += right_tree.node.cover
             tfi.has_leaf_stats = True
 
         self.collect_interactions(tree.left, currentInteractionLeft, currentGain, currentCover, path_probability_left, depth + 1, deepening)
@@ -396,8 +400,8 @@ def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, Ma
         KTotalGain = sum([i.gain for i in interactions])
         TotalCover = sum([i.cover for i in interactions])
         TotalFScore = sum([i.fscore for i in interactions])
-        TotalFScoreWeighted = sum([i.fscore_weighted for i in interactions])
-        TotalFScoreWeightedAverage = sum([i.average_fscore_weighted for i in interactions])
+        TotalFScoreWeighted = sum([i.wfscore for i in interactions])
+        TotalFScoreWeightedAverage = sum([i.average_wfscore for i in interactions])
 
         if topK > 0:
             interactions = interactions[0:topK]
@@ -426,8 +430,8 @@ def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, Ma
 
         gainSorted = rank_inplace([-f.gain for f in interactions])
         fScoreSorted = rank_inplace([-f.fscore for f in interactions])
-        fScoreWeightedSorted = rank_inplace([-f.fscore_weighted for f in interactions])
-        averagefScoreWeightedSorted = rank_inplace([-f.average_fscore_weighted for f in interactions])
+        fScoreWeightedSorted = rank_inplace([-f.wfscore for f in interactions])
+        averagefScoreWeightedSorted = rank_inplace([-f.average_wfscore for f in interactions])
         averageGainSorted = rank_inplace([-f.average_gain for f in interactions])
         expectedGainSorted = rank_inplace([-f.expected_gain for f in interactions])
 
@@ -435,8 +439,8 @@ def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, Ma
             ws.write(i + 1, 0, fi.name)
             ws.write(i + 1, 1, fi.gain)
             ws.write(i + 1, 2, fi.fscore)
-            ws.write(i + 1, 3, fi.fscore_weighted)
-            ws.write(i + 1, 4, fi.average_fscore_weighted)
+            ws.write(i + 1, 3, fi.wfscore)
+            ws.write(i + 1, 4, fi.average_wfscore)
             ws.write(i + 1, 5, fi.average_gain)
             ws.write(i + 1, 6, fi.expected_gain)
             ws.write(i + 1, 7, 1 + gainSorted[i])
@@ -467,10 +471,10 @@ def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, Ma
 
         for i, fi in enumerate(interactions):
             ws.write(i + 1, 0, fi.name)
-            ws.write(i + 1, 1, fi.SumLeafValuesLeft)
-            ws.write(i + 1, 2, fi.SumLeafValuesRight)
-            ws.write(i + 1, 3, fi.SumLeafCoversLeft)
-            ws.write(i + 1, 4, fi.SumLeafCoversRight)
+            ws.write(i + 1, 1, fi.sum_leaf_values_left)
+            ws.write(i + 1, 2, fi.sum_leaf_values_right)
+            ws.write(i + 1, 3, fi.sum_leaf_covers_left)
+            ws.write(i + 1, 4, fi.sum_leaf_covers_right)
 
     interactions = FeatureInteractions.interactions_of_depth(0)
     if interactions:
