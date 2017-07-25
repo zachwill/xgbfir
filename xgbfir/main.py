@@ -634,8 +634,7 @@ def save_excel(booster, feature_names=None, output='XGBFeatureInteractions.xlsx'
         if 'booster' in dir(booster):
             booster = booster.booster()
         else:
-            # Shouldn't this be an exception?
-            return -20
+            raise Exception("Could not find `booster` of XGB model.")
     if feature_names is not None:
         if isinstance(feature_names, list):
             booster.feature_names = feature_names
