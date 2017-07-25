@@ -17,19 +17,20 @@ import re
 import xlsxwriter
 
 
-_COMPARER = None
-
-
-def feature_score_comparer(metric):
-    global _COMPARER
-    _COMPARER = {
-        'gain': lambda x: -x.gain,
-        'fscore': lambda x: -x.FScore,
-        'wfscore': lambda x: -x.wfscore,
-        'average_wfscore': lambda x: -x.average_wfscore,
-        'averagegain': lambda x: -x.average_gain,
-        'expectedgain': lambda x: -x.expected_gain,
-    }[metric.lower()]
+def feature_score_comparer(metric="gain"):
+    comparer = {
+        "gain": lambda x: -x.gain,
+        "fscore": lambda x: -x.fscore,
+        "wfscore": lambda x: -x.wfscore,
+        "avgwfscore": lambda x: -x.average_wfscore,
+        "avggain": lambda x: -x.average_gain,
+        "expgain": lambda x: -x.expected_gain,
+    }
+    metric = metric.lower()
+    if metric not in comparer:
+        print(metric)
+        raise Exception("Can not compare by:  {}".format(metric))
+    return comparer[metric]
 
 
 class SplitValueHistogram:
@@ -98,9 +99,11 @@ class FeatureInteraction:
 
 
 class FeatureInteractions:
-    def __init__(self):
+    def __init__(self, comparer=None):
         self.interactions = {}
-        # TODO: Shouldn't comparsion take place here? And be an initial param?
+        if not comparer:
+            comparer = feature_score_comparer()
+        self._comparer = comparer
 
     @property
     def count(self):
@@ -109,15 +112,15 @@ class FeatureInteractions:
 
     def interactions_of_depth(self, depth):
         return sorted([
-            self.interactions[key] for key in self.interactions.keys() if self.interactions[key].depth == depth],
-            key=_COMPARER
-        )
+            self.interactions[key] for key in self.interactions.keys()
+            if self.interactions[key].depth == depth
+        ], key=self._comparer)
 
     def interactions_with_leaf_stats(self):
         return sorted([
-            self.interactions[key] for key in self.interactions.keys() if self.interactions[key].has_leaf_stats],
-            key=_COMPARER
-        )
+            self.interactions[key] for key in self.interactions.keys()
+            if self.interactions[key].has_leaf_stats
+        ], key=self._comparer)
 
     def merge(self, other):
         for key in other.interactions.keys():
@@ -139,19 +142,23 @@ class FeatureInteractions:
 
 
 class XGBModel:
-    def __init__(self, verbosity=0):
+    def __init__(self, comparer=None, verbosity=0):
         self.xgb_trees = []
-        self._verbosity = verbosity
         self._tree_index = 0
         self._max_deepening = 0
         self._path_memo = set()
         self._max_interaction_depth = 0
 
+        if not comparer:
+            comparer = feature_score_comparer()
+        self._comparer = comparer
+        self._verbosity = verbosity
+
     def add_tree(self, tree):
         self.xgb_trees.append(tree)
 
     def feature_interactions(self, max_interaction_depth, max_deepening):
-        xgb_feature_interactions = FeatureInteractions()
+        xgb_feature_interactions = FeatureInteractions(self._comparer)
         self._max_interaction_depth = max_interaction_depth
         self._max_deepening = max_deepening
 
@@ -165,7 +172,7 @@ class XGBModel:
             if self._verbosity >= 2:
                 sys.stdout.write("Collecting feature interactions within tree #{} ".format(i + 1))
 
-            self._tree_feature_interactions = FeatureInteractions()
+            self._tree_feature_interactions = FeatureInteractions(self._comparer)
             self._path_memo = set()
             self._tree_index = i
 
@@ -273,8 +280,12 @@ class XGBTree:
 
 
 class XGBModelParser:
-    def __init__(self, verbosity=0):
+    def __init__(self, comparer=None, verbosity=0):
+        if not comparer:
+            comparer = feature_score_comparer()
+        self._comparer = comparer
         self._verbosity = verbosity
+
         self.node_regex = re.compile("(\d+):\[(.*)<(.+)\]\syes=(.*),no=(.*),missing=.*,gain=(.*),cover=(.*)")
         self.leaf_regex = re.compile("(\d+):leaf=(.*),cover=(.*)")
         self.node_list = {}
@@ -308,7 +319,7 @@ class XGBModelParser:
         return node
 
     def model_from_file(self, file_name, max_trees):
-        model = XGBModel(self._verbosity)
+        model = XGBModel(self._comparer, self._verbosity)
         self.node_list = {}
         number_of_trees = 0
         with open(file_name) as f:
@@ -347,7 +358,7 @@ class XGBModelParser:
         return model
 
     def model_from_memory(self, dump, max_trees):
-        model = XGBModel(self._verbosity)
+        model = XGBModel(self._comparer, self._verbosity)
         self.node_list = {}
         number_of_trees = 0
         for booster_line in dump:
@@ -375,7 +386,7 @@ def rank_inplace(a):
     return [i[0] for i in c]
 
 
-def FeatureInteractionsWriter(interactions, file_name, MaxDepth, topK, max_histograms, verbosity=0):
+def FeatureInteractionsWriter(feature_interactions, file_name, MaxDepth, topK, max_histograms, verbosity=0):
 
     if verbosity >= 1:
         print("Writing {}".format(file_name))
@@ -398,7 +409,7 @@ def FeatureInteractionsWriter(interactions, file_name, MaxDepth, topK, max_histo
         if verbosity >= 1:
             print("Writing feature interactions with depth {}".format(depth))
 
-        interactions = interactions.interactions_of_depth(depth)
+        interactions = feature_interactions.interactions_of_depth(depth)
 
         KTotalGain = sum([i.gain for i in interactions])
         TotalCover = sum([i.cover for i in interactions])
@@ -459,7 +470,7 @@ def FeatureInteractionsWriter(interactions, file_name, MaxDepth, topK, max_histo
             ws.write(i + 1, 14, fi.average_tree_index, cf_num)
             ws.write(i + 1, 15, fi.average_tree_depth, cf_num)
 
-    interactions = interactions.interactions_with_leaf_stats()
+    interactions = feature_interactions.interactions_with_leaf_stats()
     if interactions:
         if verbosity >= 1:
             print("Writing leaf statistics")
@@ -482,7 +493,7 @@ def FeatureInteractionsWriter(interactions, file_name, MaxDepth, topK, max_histo
             ws.write(i + 1, 3, fi.sum_leaf_covers_left, cf_num)
             ws.write(i + 1, 4, fi.sum_leaf_covers_right, cf_num)
 
-    interactions = interactions.interactions_of_depth(0)
+    interactions = feature_interactions.interactions_of_depth(0)
     if interactions:
         if verbosity >= 1:
             print("Writing split value histograms")
@@ -600,9 +611,8 @@ max_histograms (-H): {histograms}
     if verbosity >= 1:
         print(settings_print)
 
-    feature_score_comparer(args.sort)
-
-    parser = XGBModelParser(verbosity)
+    comparer = feature_score_comparer(args.sort)
+    parser = XGBModelParser(comparer, verbosity)
     model = parser.model_from_file(args.XGBModelFile, args.max_trees)
     interactions = model.feature_interactions(args.max_interaction_depth, args.max_deepening)
 
@@ -631,8 +641,9 @@ def save_excel(booster, feature_names=None, output='XGBFeatureInteractions.xlsx'
             booster.feature_names = feature_names
         else:
             booster.feature_names = list(feature_names)
-    feature_score_comparer(sort)
-    parser = XGBModelParser()
+
+    comparer = feature_score_comparer(sort)
+    parser = XGBModelParser(comparer)
     dump = booster.get_dump('', with_stats=True)
     model = parser.model_from_memory(dump, max_trees)
     interactions = model.feature_interactions(max_interaction_depth, max_deepening)
