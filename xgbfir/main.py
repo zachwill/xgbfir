@@ -375,7 +375,7 @@ def rank_inplace(a):
     return [i[0] for i in c]
 
 
-def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, max_histograms, verbosity=0):
+def FeatureInteractionsWriter(interactions, file_name, MaxDepth, topK, max_histograms, verbosity=0):
 
     if verbosity >= 1:
         print("Writing {}".format(file_name))
@@ -398,7 +398,7 @@ def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, ma
         if verbosity >= 1:
             print("Writing feature interactions with depth {}".format(depth))
 
-        interactions = FeatureInteractions.interactions_of_depth(depth)
+        interactions = interactions.interactions_of_depth(depth)
 
         KTotalGain = sum([i.gain for i in interactions])
         TotalCover = sum([i.cover for i in interactions])
@@ -431,12 +431,12 @@ def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, ma
         ]):
             ws.write(0, col, name)
 
-        gainSorted = rank_inplace([-f.gain for f in interactions])
-        fScoreSorted = rank_inplace([-f.fscore for f in interactions])
-        fScoreWeightedSorted = rank_inplace([-f.wfscore for f in interactions])
-        averagefScoreWeightedSorted = rank_inplace([-f.average_wfscore for f in interactions])
-        averageGainSorted = rank_inplace([-f.average_gain for f in interactions])
-        expectedGainSorted = rank_inplace([-f.expected_gain for f in interactions])
+        gain_sorted = rank_inplace([-f.gain for f in interactions])
+        fscore_sorted = rank_inplace([-f.fscore for f in interactions])
+        wfscore_sorted = rank_inplace([-f.wfscore for f in interactions])
+        average_wfscore_sorted = rank_inplace([-f.average_wfscore for f in interactions])
+        average_gain_sorted = rank_inplace([-f.average_gain for f in interactions])
+        expected_gain_sorted = rank_inplace([-f.expected_gain for f in interactions])
 
         for i, fi in enumerate(interactions):
             ws.write(i + 1, 0, fi.name)
@@ -446,18 +446,20 @@ def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, ma
             ws.write(i + 1, 4, fi.average_wfscore, cf_num)
             ws.write(i + 1, 5, fi.average_gain, cf_num)
             ws.write(i + 1, 6, fi.expected_gain, cf_num)
-            ws.write(i + 1, 7, 1 + gainSorted[i])
-            ws.write(i + 1, 8, 1 + fScoreSorted[i])
-            ws.write(i + 1, 9, 1 + fScoreWeightedSorted[i])
-            ws.write(i + 1, 10, 1 + averagefScoreWeightedSorted[i])
-            ws.write(i + 1, 11, 1 + averageGainSorted[i])
-            ws.write(i + 1, 12, 1 + expectedGainSorted[i])
-            average_rank = (6.0 + gainSorted[i] + fScoreSorted[i] + fScoreWeightedSorted[i] + averagefScoreWeightedSorted[i] + averageGainSorted[i] + expectedGainSorted[i]) / 6.0
+            ws.write(i + 1, 7, 1 + gain_sorted[i])
+            ws.write(i + 1, 8, 1 + fscore_sorted[i])
+            ws.write(i + 1, 9, 1 + wfscore_sorted[i])
+            ws.write(i + 1, 10, 1 + average_wfscore_sorted[i])
+            ws.write(i + 1, 11, 1 + average_gain_sorted[i])
+            ws.write(i + 1, 12, 1 + expected_gain_sorted[i])
+
+            average_rank = (6.0 + gain_sorted[i] + fscore_sorted[i] + wfscore_sorted[i] + average_wfscore_sorted[i] + average_gain_sorted[i] + expected_gain_sorted[i]) / 6.0
             ws.write(i + 1, 13, average_rank, cf_num)
+
             ws.write(i + 1, 14, fi.average_tree_index, cf_num)
             ws.write(i + 1, 15, fi.average_tree_depth, cf_num)
 
-    interactions = FeatureInteractions.interactions_with_leaf_stats()
+    interactions = interactions.interactions_with_leaf_stats()
     if interactions:
         if verbosity >= 1:
             print("Writing leaf statistics")
@@ -480,7 +482,7 @@ def FeatureInteractionsWriter(FeatureInteractions, file_name, MaxDepth, topK, ma
             ws.write(i + 1, 3, fi.sum_leaf_covers_left, cf_num)
             ws.write(i + 1, 4, fi.sum_leaf_covers_right, cf_num)
 
-    interactions = FeatureInteractions.interactions_of_depth(0)
+    interactions = interactions.interactions_of_depth(0)
     if interactions:
         if verbosity >= 1:
             print("Writing split value histograms")
@@ -535,7 +537,7 @@ URL: https://github.com/limexp/xgbfir
         help="Xgboost model dump (dumped w/ 'with_stats=True')")
 
     arg_parser.add_argument(
-        '-o', dest='output', action='store', default='XgbFeatureInteractions.xlsx',
+        '-o', dest='output', action='store', default='XGBFeatureInteractions.xlsx',
         help='Xlsx file to be written')
 
     arg_parser.add_argument(
