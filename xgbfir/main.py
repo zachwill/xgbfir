@@ -17,22 +17,6 @@ import re
 import xlsxwriter
 
 
-def feature_score_comparer(metric="gain"):
-    comparer = {
-        "gain": lambda x: -x.gain,
-        "fscore": lambda x: -x.fscore,
-        "wfscore": lambda x: -x.wfscore,
-        "avgwfscore": lambda x: -x.average_wfscore,
-        "avggain": lambda x: -x.average_gain,
-        "expgain": lambda x: -x.expected_gain,
-    }
-    metric = metric.lower()
-    if metric not in comparer:
-        print(metric)
-        raise Exception("Can not compare by:  {}".format(metric))
-    return comparer[metric]
-
-
 class SplitValueHistogram:
     def __init__(self):
         self.values = {}
@@ -48,13 +32,13 @@ class SplitValueHistogram:
 
 
 class FeatureInteraction:
-    def __init__(self, interaction, gain, cover, path_probability, depth, tree_index, fscore=1):
+    def __init__(self, tree_nodes, gain, cover, path_probability, depth, tree_index, fscore=1):
         self.histogram = SplitValueHistogram()
 
-        features = sorted(interaction, key=lambda x: x.feature)
+        features = sorted(tree_nodes, key=lambda x: x.feature)
         self.name = "|".join(x.feature for x in features)
 
-        self.depth = len(interaction) - 1
+        self.depth = len(tree_nodes) - 1
         self.gain = gain
         self.cover = cover
         self.fscore = fscore
@@ -65,7 +49,7 @@ class FeatureInteraction:
         self.has_leaf_stats = False
 
         if self.depth == 0:
-            self.histogram.add_value(interaction[0].split_value, 1)
+            self.histogram.add_value(tree_nodes[0].split_value, 1)
 
         self.sum_leaf_values_left = 0.0
         self.sum_leaf_values_right = 0.0
@@ -108,7 +92,7 @@ class FeatureInteractions:
     @property
     def count(self):
         # TODO: This was never used in previous code
-        return len(self.interactions.keys())
+        return len(self.interactions)
 
     def interactions_of_depth(self, depth):
         return sorted([
@@ -325,7 +309,7 @@ class XGBModelParser:
         with open(file_name) as f:
             for line in f:
                 line = line.strip()
-                if (not line) or line.startswith('booster'):
+                if not line or line.startswith('booster'):
                     if any(self.node_list):
                         number_of_trees += 1
                         if self._verbosity >= 2:
@@ -386,26 +370,41 @@ def rank_inplace(a):
     return [i[0] for i in c]
 
 
-def FeatureInteractionsWriter(feature_interactions, file_name, MaxDepth, topK, max_histograms, verbosity=0):
+def feature_score_comparer(metric="gain"):
+    comparer = {
+        "gain": lambda x: -x.gain,
+        "fscore": lambda x: -x.fscore,
+        "wfscore": lambda x: -x.wfscore,
+        "avgwfscore": lambda x: -x.average_wfscore,
+        "avggain": lambda x: -x.average_gain,
+        "expgain": lambda x: -x.expected_gain,
+    }
+    metric = metric.lower()
+    if metric not in comparer:
+        raise Exception("Can not compare by:  {}".format(metric))
+    return comparer[metric]
+
+
+def FeatureInteractionsWriter(feature_interactions, file_name, max_depth, top_k, max_histograms, verbosity=0):
 
     if verbosity >= 1:
         print("Writing {}".format(file_name))
 
     workbook = xlsxwriter.Workbook(file_name)
 
-    cf_first_row = workbook.add_format()
-    cf_first_row.set_align('center')
-    cf_first_row.set_align('vcenter')
-    cf_first_row.set_bold(True)
+    first_row = workbook.add_format()
+    first_row.set_align('center')
+    first_row.set_align('vcenter')
+    first_row.set_bold(True)
 
-    cf_first_column = workbook.add_format()
-    cf_first_column.set_align('center')
-    cf_first_column.set_align('vcenter')
+    first_column = workbook.add_format()
+    first_column.set_align('center')
+    first_column.set_align('vcenter')
 
-    cf_num = workbook.add_format()
-    cf_num.set_num_format('0.00')
+    number_format = workbook.add_format()
+    number_format.set_num_format('0.00')
 
-    for depth in range(MaxDepth + 1):
+    for depth in range(max_depth + 1):
         if verbosity >= 1:
             print("Writing feature interactions with depth {}".format(depth))
 
@@ -417,23 +416,22 @@ def FeatureInteractionsWriter(feature_interactions, file_name, MaxDepth, topK, m
         TotalFScoreWeighted = sum([i.wfscore for i in interactions])
         TotalFScoreWeightedAverage = sum([i.average_wfscore for i in interactions])
 
-        if topK > 0:
-            interactions = interactions[0:topK]
+        if top_k > 0:
+            interactions = interactions[0:top_k]
 
         if not interactions:
             break
 
         ws = workbook.add_worksheet("Interaction Depth {}".format(depth))
 
-        ws.set_row(0, 20, cf_first_row)
-
-        ws.set_column(0, 0, max([len(i.name) for i in interactions]) + 10, cf_first_column)
+        ws.set_row(0, 20, first_row)
+        ws.set_column(0, 0, max([len(i.name) for i in interactions]) + 10, first_column)
 
         ws.set_column(1, 13, 17)
         ws.set_column(10, 11, 18)
         ws.set_column(12, 12, 19)
-        ws.set_column(13, 13, 17, cf_num)
-        ws.set_column(14, 15, 19, cf_num)
+        ws.set_column(13, 13, 17, number_format)
+        ws.set_column(14, 15, 19, number_format)
 
         for col, name in enumerate([
             "Interaction", "Gain", "FScore", "wFScore", "Average wFScore", "Average Gain", "Expected Gain",
@@ -451,12 +449,12 @@ def FeatureInteractionsWriter(feature_interactions, file_name, MaxDepth, topK, m
 
         for i, fi in enumerate(interactions):
             ws.write(i + 1, 0, fi.name)
-            ws.write(i + 1, 1, fi.gain, cf_num)
-            ws.write(i + 1, 2, fi.fscore, cf_num)
-            ws.write(i + 1, 3, fi.wfscore, cf_num)
-            ws.write(i + 1, 4, fi.average_wfscore, cf_num)
-            ws.write(i + 1, 5, fi.average_gain, cf_num)
-            ws.write(i + 1, 6, fi.expected_gain, cf_num)
+            ws.write(i + 1, 1, fi.gain, number_format)
+            ws.write(i + 1, 2, fi.fscore, number_format)
+            ws.write(i + 1, 3, fi.wfscore, number_format)
+            ws.write(i + 1, 4, fi.average_wfscore, number_format)
+            ws.write(i + 1, 5, fi.average_gain, number_format)
+            ws.write(i + 1, 6, fi.expected_gain, number_format)
             ws.write(i + 1, 7, 1 + gain_sorted[i])
             ws.write(i + 1, 8, 1 + fscore_sorted[i])
             ws.write(i + 1, 9, 1 + wfscore_sorted[i])
@@ -465,10 +463,10 @@ def FeatureInteractionsWriter(feature_interactions, file_name, MaxDepth, topK, m
             ws.write(i + 1, 12, 1 + expected_gain_sorted[i])
 
             average_rank = (6.0 + gain_sorted[i] + fscore_sorted[i] + wfscore_sorted[i] + average_wfscore_sorted[i] + average_gain_sorted[i] + expected_gain_sorted[i]) / 6.0
-            ws.write(i + 1, 13, average_rank, cf_num)
+            ws.write(i + 1, 13, average_rank, number_format)
 
-            ws.write(i + 1, 14, fi.average_tree_index, cf_num)
-            ws.write(i + 1, 15, fi.average_tree_depth, cf_num)
+            ws.write(i + 1, 14, fi.average_tree_index, number_format)
+            ws.write(i + 1, 15, fi.average_tree_depth, number_format)
 
     interactions = feature_interactions.interactions_with_leaf_stats()
     if interactions:
@@ -477,8 +475,8 @@ def FeatureInteractionsWriter(feature_interactions, file_name, MaxDepth, topK, m
 
         ws = workbook.add_worksheet("Leaf Statistics")
 
-        ws.set_row(0, 20, cf_first_row)
-        ws.set_column(0, 0, max([len(i.name) for i in interactions]) + 10, cf_first_column)
+        ws.set_row(0, 20, first_row)
+        ws.set_column(0, 0, max([len(i.name) for i in interactions]) + 10, first_column)
         ws.set_column(1, 4, 20)
 
         for col, name in enumerate([
@@ -488,10 +486,10 @@ def FeatureInteractionsWriter(feature_interactions, file_name, MaxDepth, topK, m
 
         for i, fi in enumerate(interactions):
             ws.write(i + 1, 0, fi.name)
-            ws.write(i + 1, 1, fi.sum_leaf_values_left, cf_num)
-            ws.write(i + 1, 2, fi.sum_leaf_values_right, cf_num)
-            ws.write(i + 1, 3, fi.sum_leaf_covers_left, cf_num)
-            ws.write(i + 1, 4, fi.sum_leaf_covers_right, cf_num)
+            ws.write(i + 1, 1, fi.sum_leaf_values_left, number_format)
+            ws.write(i + 1, 2, fi.sum_leaf_values_right, number_format)
+            ws.write(i + 1, 3, fi.sum_leaf_covers_left, number_format)
+            ws.write(i + 1, 4, fi.sum_leaf_covers_right, number_format)
 
     interactions = feature_interactions.interactions_of_depth(0)
     if interactions:
@@ -500,8 +498,8 @@ def FeatureInteractionsWriter(feature_interactions, file_name, MaxDepth, topK, m
 
         ws = workbook.add_worksheet("Split Value Histograms")
 
-        ws.set_row(0, 20, cf_first_row)
-        ws.set_column(0, 0, max([len(i.name) for i in interactions]) + 10, cf_first_column)
+        ws.set_row(0, 20, first_row)
+        ws.set_column(0, 0, max([len(i.name) for i in interactions]) + 10, first_column)
         ws.set_column(1, 4, 20)
 
         for col, name in enumerate([
