@@ -270,8 +270,8 @@ class XGBModelParser:
         self._comparer = comparer
         self._verbosity = verbosity
 
-        # TODO: Might not be a `< \d+` here...
-        self.node_regex = re.compile("(\d+):\[(.*)<(.+)\]\syes=(.*),no=(.*),missing=.*,gain=(.*),cover=(.*)")
+        # One update: nodes might not be less than a value
+        self.node_regex = re.compile("(\d+):\[(.+)\]\syes=(.*),no=(.*),missing=.*,gain=(.*),cover=(.*)")
         self.leaf_regex = re.compile("(\d+):leaf=(.*),cover=(.*)")
         self.node_list = {}
 
@@ -295,12 +295,19 @@ class XGBModelParser:
             m = self.node_regex.match(line)
             node.is_leaf = False
             node.number = int(m.group(1))
-            node.feature = m.group(2)
-            node.split_value = float(m.group(3))
-            node.left_child = int(m.group(4))
-            node.right_child = int(m.group(5))
-            node.gain = float(m.group(6))
-            node.cover = float(m.group(7))
+
+            feature = m.group(2)
+            if "<" in feature:
+                node.feature, node.split_value = feature.split("<")
+            else:
+                # The feature is True/False in these instances
+                node.feature = feature
+                node.split_value = 1
+
+            node.left_child = int(m.group(3))
+            node.right_child = int(m.group(4))
+            node.gain = float(m.group(5))
+            node.cover = float(m.group(6))
         return node
 
     def model_from_file(self, file_name, max_trees):
