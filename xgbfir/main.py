@@ -270,6 +270,7 @@ class XGBModelParser:
         self._comparer = comparer
         self._verbosity = verbosity
 
+        # TODO: Might not be a `< \d+` here...
         self.node_regex = re.compile("(\d+):\[(.*)<(.+)\]\syes=(.*),no=(.*),missing=.*,gain=(.*),cover=(.*)")
         self.leaf_regex = re.compile("(\d+):leaf=(.*),cover=(.*)")
         self.node_list = {}
@@ -402,7 +403,7 @@ def FeatureInteractionsWriter(feature_interactions, file_name, max_depth, top_k,
     first_column.set_align('vcenter')
 
     number_format = workbook.add_format()
-    number_format.set_num_format('0.00')
+    number_format.set_num_format('#,###.00')
 
     for depth in range(max_depth + 1):
         if verbosity >= 1:
