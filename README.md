@@ -58,19 +58,19 @@ You can produce feature interactions file without saving any model dump file bef
 ```python
 import xgbfir
 
-xgbfir.saveXgbFI(booster) # booster is a XGBoost booster
+xgbfir.save_excel(booster) # booster is a XGBoost booster
 ```
 
-List of saveXgbFI function parameters:
+List of `save_excel` function parameters:
  * **booster** - XGBoost booster or XGBClassifier
  * **feature_names** (default = None) - feature names that *will be set in booster*
- * **OutputXlsxFile** (default = 'XgbFeatureInteractions.xlsx') - output file name
- * **MaxTrees** (default = 100) - Upper bound for trees to be parsed
- * **MaxInteractionDepth** (default = 2) - Upper bound for extracted feature interactions depth
- * **MaxDeepening** (default = -1) - Upper bound for interaction start deepening (zero deepening => interactions starting at root only)
- * **TopK** (default = 100) - Upper bound for exported feature interactions per depth level
- * **MaxHistograms** (default = 10) - Maximum number of histograms
- * **SortBy** (default = 'Gain') - Score metric to sort by (Gain, FScore, wFScore, AvgwFScore, AvgGain, ExpGain)
+ * **output** (default = 'XgbFeatureInteractions.xlsx') - output file name
+ * **max_trees** (default = 100) - Upper bound for trees to be parsed
+ * **max_interaction_depth** (default = 2) - Upper bound for extracted feature interactions depth
+ * **max_deepening** (default = -1) - Upper bound for interaction start deepening (zero deepening => interactions starting at root only)
+ * **top_k** (default = 100) - Upper bound for exported feature interactions per depth level
+ * **max_histograms** (default = 10) - Maximum number of histograms
+ * **sort** (default = 'Gain') - Score metric to sort by (Gain, FScore, wFScore, AvgwFScore, AvgGain, ExpGain)
 
 ### Python example
 
@@ -88,7 +88,7 @@ boston = load_boston()
 xgb_rmodel = xgb.XGBRegressor().fit(boston['data'], boston['target'])
 
 # saving to file with proper feature names
-xgbfir.saveXgbFI(xgb_rmodel, feature_names=boston.feature_names, OutputXlsxFile = 'bostonFI.xlsx')
+xgbfir.save_excel(xgb_rmodel, feature_names=boston.feature_names, output='bostonFI.xlsx')
 
 
 # loading database
@@ -98,7 +98,7 @@ iris = load_iris()
 xgb_cmodel = xgb.XGBClassifier().fit(iris['data'], iris['target'])
 
 # saving to file with proper feature names
-xgbfir.saveXgbFI(xgb_cmodel, feature_names=iris.feature_names, OutputXlsxFile = 'irisFI.xlsx')
+xgbfir.save_excel(xgb_cmodel, feature_names=iris.feature_names, output='irisFI.xlsx')
 ```
 
 
